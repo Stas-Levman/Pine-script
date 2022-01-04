@@ -1,0 +1,133 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © staslevman
+
+//@version=4
+strategy("Pre market exact RS levels $AI",overlay=true, initial_capital = 12000, default_qty_value = 100, default_qty_type = strategy.percent_of_equity, slippage = 4, commission_type = strategy.commission.cash_per_order, commission_value = 2.5, calc_on_every_tick = true, process_orders_on_close=true)
+
+var preMarketSession = "0400-0930" //setting the premarket time
+isPreMarket = not na(time(timeframe.period, "0400-0930")) //boolean for if the session is currently in premarket
+isEndOfMarket = not na(time(timeframe.period, "1555-1600"))
+profitMultiplier = input(title = "Take Profit Multiplier %", type = input.float, defval = 5)
+stopLossMultiplier = input(title = "Stop Loss Multiplier %", type = input.float, defval = 0.45)
+matches = input (title = "Matches for trade", type = input.integer, defval = 3)
+enableShort = input(title = "Enable Short", type = input.bool, defval = true)
+enableLong = input(title = "Enable Long", type = input.bool, defval = true)
+
+var int resistancePoints = 0
+var int supportPoints = 0
+
+bool buySignal = false
+bool sellSignal = false
+
+var int barsInPreMarket = 0 
+
+timePeriod = time >= timestamp(syminfo.timezone, 2021, 01, 01, 0, 0)
+notInTrade = strategy.position_size == 0
+
+//Premarket high and low
+t = time("1440","0400-0930") // 1440 is the number of minutes in a whole day.
+is_first = na(t[1]) and not na(t) or t[1] < t
+ending_hour = 9
+ending_minute = 30
+
+var pm_high = float(na)
+var pm_low = float(na)
+
+if is_first and barstate.isnew and ((hour < ending_hour or hour >= 16) or (hour == ending_hour and minute < ending_minute))
+    pm_high := high
+    pm_low := low
+else 
+    pm_high := pm_high[1]
+    pm_low := pm_low[1]
+
+if high > pm_high and ((hour < ending_hour or hour >= 1600) or (hour == ending_hour and minute < ending_minute))
+    pm_high := high
+    
+if low < pm_low and ((hour < ending_hour or hour >= 1600) or (hour == ending_hour and minute < ending_minute))
+    pm_low := low
+
+var previousHigh = float(na)
+var previousLow = float(na)
+
+if na(previousHigh) and na(previousLow)
+    previousHigh := pm_high
+    previousLow := pm_low
+
+int lowMatches = 0 
+int highMatches = 0
+
+float _lowest = na
+float _highest = na
+
+if isPreMarket
+    barsInPreMarket += 1
+    _lowest := lowest((barsInPreMarket < 10) ? barsInPreMarket : 10)
+    _highest := highest((barsInPreMarket < 10) ? barsInPreMarket : 10)
+    if high > previousHigh * 1.000275
+        resistancePoints := 0
+        previousHigh := high
+    if low < previousLow * 0.999725
+        supportPoints := 0
+        previousLow := low
+        
+    if (high < (pm_high * 1.000275) and high > (pm_high * 0.999725))
+        resistancePoints += 1 
+    
+    if (low < (pm_low * 1.000275) and low > (pm_low * 0.999725))
+        supportPoints += 1
+        
+    
+    for i=0 to barsInPreMarket < 10 ? barsInPreMarket : 10
+        if (low >= low[i] * 0.999900 and low <= low[i] * 1.000100) and _lowest > low * 0.999725
+            lowMatches += 1
+    
+    for i=0 to barsInPreMarket < 10 ? barsInPreMarket : 10
+        if (high >= high[i] * 0.999900 and high <= high[i] * 1.000100) and _highest < high * 1.000275
+            highMatches += 1    
+else
+    barsInPreMarket := 0
+
+bool closerToLow = close - pm_low < pm_high - close
+bool closerToHigh = pm_high - close < close - pm_low
+    
+    
+if highMatches == matches and closerToHigh
+    sellSignal := true
+if lowMatches == matches and closerToLow
+    buySignal := true
+    
+if (buySignal and notInTrade and sma(close, 200) < close and enableLong)
+    stopLoss = low * (1 - stopLossMultiplier/100)
+    takeProfit = low * (1 + profitMultiplier/100)
+    strategy.entry("long", strategy.long)
+    if hour == 15 and minute == 55 and not notInTrade
+        strategy.exit("exit", "long", stop = stopLoss, limit = close)
+    else
+        strategy.exit("exit", "long", stop = stopLoss, limit = takeProfit)    
+    
+if (sellSignal and notInTrade and sma(close, 200) > close and enableShort)
+    stopLoss = high * (1 + stopLossMultiplier/100)
+    takeProfit = high * (1 - profitMultiplier/100)
+    strategy.entry("short", strategy.short)
+    if hour == 15 and minute == 55 and not notInTrade
+        strategy.exit("exit", "long", stop = stopLoss, limit = close)
+    else
+        strategy.exit("exit", "short", stop = stopLoss, limit = takeProfit)
+
+if isEndOfMarket and not notInTrade
+    strategy.close_all()
+    
+plot(resistancePoints, color = color.red)
+plot(supportPoints, color = color.green)
+plot(pm_high, color = color.red)
+plot(pm_low, color = color.green)
+plot(lowMatches)
+plot(highMatches)
+
+
+//plotshape(buySignal, style=shape.triangleup, location=location.belowbar, color=color.red, text = "Buy")
+//plotshape(sellSignal, style=shape.triangledown, location=location.abovebar, color=color.green, text = "Sell")
+
+
+    
+    
